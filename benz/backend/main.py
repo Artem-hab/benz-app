@@ -6,9 +6,11 @@ from sqlalchemy import desc, func
 from datetime import datetime, timedelta
 from pathlib import Path
 import httpx
+import json
 
 from . import models, schemas, events, predictor
 from .database import engine, get_db
+from .predictor import haversine_km
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -19,12 +21,9 @@ app.add_middleware(
     allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )
 
+
 @app.post("/api/import-stations")
 async def import_stations(lat: float, lon: float, radius_km: float = 30, db: Session = Depends(get_db)):
-    import json
-    from pathlib import Path
-    from .predictor import haversine_km
-
     data_file = Path(__file__).parent / "stations_raw.geojson"
     if not data_file.exists():
         raise HTTPException(500, "Файл stations_raw.geojson не найден")
@@ -40,23 +39,19 @@ async def import_stations(lat: float, lon: float, radius_km: float = 30, db: Ses
         props = feat.get("properties", {}) or {}
         geom = feat.get("geometry", {}) or {}
 
-        # Пропускаем всё, что не АЗС
         if props.get("amenity") != "fuel":
             continue
 
-        # Координаты в GeoJSON — [lon, lat]!
         coords = geom.get("coordinates")
         if not coords or len(coords) < 2:
             continue
         s_lon, s_lat = coords[0], coords[1]
 
-        # Фильтр по радиусу
         d = haversine_km(lat, lon, s_lat, s_lon)
         if d > radius_km:
             skipped += 1
             continue
 
-        # Стабильный ID
         osm_id = feat.get("id") or props.get("@id") or f"feat_{s_lat:.4f}_{s_lon:.4f}"
         osm_id = str(osm_id).replace("/", "_")
 
@@ -78,6 +73,7 @@ async def import_stations(lat: float, lon: float, radius_km: float = 30, db: Ses
 
     db.commit()
     return {"added": added, "skipped": skipped, "total_features": len(features), "source": "stations_raw.geojson"}
+
 
 @app.get("/api/stations", response_model=list[schemas.StationOut])
 def get_stations(lat: float, lon: float, radius_km: float = 30, fresh_minutes: int = 180, db: Session = Depends(get_db)):
@@ -109,6 +105,7 @@ def get_stations(lat: float, lon: float, radius_km: float = 30, fresh_minutes: i
         ))
     return out
 
+
 @app.post("/api/reports", response_model=schemas.ReportOut)
 def create_report(payload: schemas.ReportCreate, db: Session = Depends(get_db)):
     recent = (
@@ -134,6 +131,7 @@ def create_report(payload: schemas.ReportCreate, db: Session = Depends(get_db)):
         db.commit()
     return report
 
+
 @app.get("/api/stations/{station_id}/events", response_model=list[schemas.EventOut])
 def station_events(station_id: int, limit: int = 100, db: Session = Depends(get_db)):
     return (
@@ -143,12 +141,14 @@ def station_events(station_id: int, limit: int = 100, db: Session = Depends(get_
         .limit(limit).all()
     )
 
+
 @app.get("/api/stations/{station_id}/prediction", response_model=schemas.PredictionOut)
 def station_prediction(station_id: int, db: Session = Depends(get_db)):
     p = predictor.predict_station(db, station_id)
     if not p:
         raise HTTPException(404, "АЗС не найдена")
     return p
+
 
 @app.get("/api/predictions", response_model=list[schemas.PredictionOut])
 def predictions(lat: float, lon: float, radius_km: float = 30, limit: int = 30, db: Session = Depends(get_db)):
@@ -160,12 +160,14 @@ def predictions(lat: float, lon: float, radius_km: float = 30, limit: int = 30, 
     ).limit(limit).all()
     return [p for s in stations if (p := predictor.predict_station(db, s.id))]
 
+
 @app.get("/api/tanker/{sighting_id}/probabilities", response_model=list[schemas.TankerProbabilityOut])
 def tanker_probs(sighting_id: int, radius_km: float = 15, db: Session = Depends(get_db)):
     t = db.query(models.TankerSighting).get(sighting_id)
     if not t:
         raise HTTPException(404, "Бензовоз не найден")
     return predictor.tanker_probabilities(db, t.lat, t.lon, radius_km)
+
 
 @app.get("/api/tankers")
 def fresh_tankers(lat: float, lon: float, radius_km: float = 50, minutes: int = 60, db: Session = Depends(get_db)):
@@ -183,9 +185,23 @@ def fresh_tankers(lat: float, lon: float, radius_km: float = 50, minutes: int = 
         .all()
     )
 
+
+@app.post("/api/admin/clear-stations")
+def clear_stations(secret: str = "", db: Session = Depends(get_db)):
+    if secret != "benz2026clean":
+        raise HTTPException(403, "Неверный secret")
+    deleted = db.query(models.Station).delete()
+    db.query(models.FuelEvent).delete()
+    db.query(models.Report).delete()
+    db.query(models.TankerSighting).delete()
+    db.commit()
+    return {"deleted_stations": deleted, "message": "База очищена"}
+
+
 @app.get("/health")
 def health():
     return {"ok": True}
+
 
 frontend_dir = Path(__file__).parent.parent / "frontend"
 if frontend_dir.exists():
