@@ -227,9 +227,6 @@ def debug_geojson():
 @app.get("/health")
 def health():
     return {"ok": True}
-@app.get("/health")
-def health():
-    return {"ok": True}
 
 
 frontend_dir = Path(__file__).parent.parent / "frontend"
