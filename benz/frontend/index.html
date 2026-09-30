@@ -1,11 +1,227 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="utf-8">
-  <title>BENZ</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BENZ — карта топлива</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  html, body, #map { height: 100%; margin: 0; font-family: system-ui, -apple-system, sans-serif; }
+  .panel {
+    position: absolute; top: 12px; left: 60px; z-index: 1000;
+    background: #fff; padding: 12px 14px; border-radius: 12px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.18); max-width: 320px;
+  }
+  .panel h3 { margin: 0 0 8px; font-size: 15px; }
+  .panel .legend span {
+    display: inline-block; padding: 3px 8px; border-radius: 6px;
+    margin: 2px; font-size: 12px; color: #fff;
+  }
+  .green { background: #2f855a; } .red { background: #c53030; }
+  .yellow { background: #b7791f; } .blue { background: #2b6cb0; }
+  .purple { background: #6b46c1; } .gray { background: #718096; }
+  .panel button {
+    margin: 3px 3px 0 0; padding: 6px 10px; border: 0; border-radius: 6px;
+    cursor: pointer; background: #edf2f7; font-size: 13px;
+  }
+  .panel button.active { background: #2b6cb0; color: #fff; }
+  .panel button:hover { background: #cbd5e0; }
+  .panel button.active:hover { background: #2b6cb0; }
+  .status-msg {
+    position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: #1a202c; color: #fff; padding: 10px 20px; border-radius: 8px;
+    z-index: 1001; display: none; font-size: 14px;
+  }
+  .status-msg.show { display: block; }
+  .popup-btn {
+    display: block; margin: 4px 0; padding: 6px 10px; width: 100%;
+    background: #4299e1; color: #fff; border: 0; border-radius: 6px;
+    cursor: pointer; font-size: 13px;
+  }
+  .popup-btn:hover { background: #3182ce; }
+  .popup-row { margin: 4px 0; font-size: 13px; }
+</style>
 </head>
 <body>
-  <h1>BENZ — мониторинг топлива</h1>
-  <p>API работает. Проверить: <a href="/docs">/docs</a></p>
+<div id="map"></div>
+
+<div class="panel">
+  <h3>⛽ BENZ — карта топлива</h3>
+  <div class="legend">
+    <span class="green">есть</span>
+    <span class="red">нет</span>
+    <span class="yellow">ограничение</span>
+    <span class="blue">очередь</span>
+    <span class="purple">бензовоз</span>
+    <span class="gray">нет данных</span>
+  </div>
+  <div style="margin-top:10px"><b>Режим:</b> <span id="mode">просмотр</span></div>
+  <div style="margin-top:6px">
+    <button data-mode="есть">✅ Есть</button>
+    <button data-mode="нет">❌ Нет</button>
+    <button data-mode="ограничение">⚠️ Огранич.</button>
+    <button data-mode="очередь">🚗 Очередь</button>
+    <button data-mode="бензовоз">🚛 Бензовоз</button>
+  </div>
+  <div style="margin-top:6px">
+    <button id="cancel">Отмена</button>
+    <button id="reload">🔄 Обновить</button>
+  </div>
+</div>
+
+<div id="status-msg" class="status-msg"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const API = "";  // тот же домен, что и фронтенд
+const CENTER = [56.3269, 44.0059];  // Нижний Новгород
+
+const deviceId = localStorage.getItem("deviceId") ||
+  (() => { const id = crypto.randomUUID(); localStorage.setItem("deviceId", id); return id; })();
+
+const map = L.map("map").setView(CENTER, 12);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  attribution: "© OpenStreetMap", maxZoom: 19
+}).addTo(map);
+
+const COLORS = {
+  "есть": "#2f855a", "нет": "#c53030", "ограничение": "#b7791f",
+  "очередь": "#2b6cb0", "бензовоз": "#6b46c1"
+};
+
+const stationsLayer = L.layerGroup().addTo(map);
+const tankersLayer = L.layerGroup().addTo(map);
+
+let mode = null;
+
+document.querySelectorAll("[data-mode]").forEach(b => {
+  b.onclick = () => {
+    mode = b.dataset.mode;
+    document.querySelectorAll("[data-mode]").forEach(x => x.classList.remove("active"));
+    b.classList.add("active");
+    document.getElementById("mode").innerText = mode;
+    if (mode === "бензовоз") showMsg("Кликните по карте в месте, где видите бензовоз");
+  };
+});
+
+document.getElementById("cancel").onclick = () => {
+  mode = null;
+  document.querySelectorAll("[data-mode]").forEach(x => x.classList.remove("active"));
+  document.getElementById("mode").innerText = "просмотр";
+};
+
+document.getElementById("reload").onclick = () => { loadStations(); loadTankers(); };
+
+function showMsg(text, ms = 3000) {
+  const el = document.getElementById("status-msg");
+  el.innerText = text;
+  el.classList.add("show");
+  setTimeout(() => el.classList.remove("show"), ms);
+}
+
+async function loadStations() {
+  try {
+    const r = await fetch(`${API}/api/stations?lat=${CENTER[0]}&lon=${CENTER[1]}&radius_km=50&fresh_minutes=360`);
+    const list = await r.json();
+    stationsLayer.clearLayers();
+    list.forEach(s => {
+      const color = COLORS[s.last_status] || "#718096";
+      const marker = L.circleMarker([s.lat, s.lon], {
+        radius: 9, color: "#fff", weight: 2,
+        fillColor: color, fillOpacity: s.last_status ? 1 : 0.5
+      }).addTo(stationsLayer);
+
+      const age = s.last_report_at
+        ? timeAgo(new Date(s.last_report_at + "Z"))
+        : "нет данных";
+
+      marker.bindPopup(`
+        <div style="min-width:220px">
+          <b>${s.name || "АЗС"}</b>${s.brand ? " · " + s.brand : ""}<br>
+          <div class="popup-row">Статус: <b>${s.last_status || "неизвестно"}</b></div>
+          <div class="popup-row">Обновлено: ${age}</div>
+          <div class="popup-row">Отметок (за 6ч): ${s.reports_count || 0}</div>
+          <div style="margin-top:8px">
+            <button class="popup-btn" onclick="reportStation(${s.id}, ${s.lat}, ${s.lon}, 'есть')">✅ Есть топливо</button>
+            <button class="popup-btn" onclick="reportStation(${s.id}, ${s.lat}, ${s.lon}, 'нет')">❌ Нет топлива</button>
+            <button class="popup-btn" onclick="reportStation(${s.id}, ${s.lat}, ${s.lon}, 'ограничение')">⚠️ Ограничение</button>
+            <button class="popup-btn" onclick="reportStation(${s.id}, ${s.lat}, ${s.lon}, 'очередь')">🚗 Очередь</button>
+          </div>
+        </div>
+      `);
+    });
+  } catch (e) {
+    console.error("loadStations error:", e);
+    showMsg("Ошибка загрузки АЗС: " + e.message);
+  }
+}
+
+async function loadTankers() {
+  try {
+    const r = await fetch(`${API}/api/tankers?lat=${CENTER[0]}&lon=${CENTER[1]}&radius_km=50&minutes=120`);
+    const list = await r.json();
+    tankersLayer.clearLayers();
+    list.forEach(t => {
+      const icon = L.divIcon({ html: "🚛", className: "", iconSize: [26, 26] });
+      L.marker([t.lat, t.lon], { icon })
+        .bindPopup(`<b>Бензовоз</b><br>${new Date(t.created_at + "Z").toLocaleTimeString()}<br>${t.comment || ""}`)
+        .addTo(tankersLayer);
+    });
+  } catch (e) {
+    console.error("loadTankers error:", e);
+  }
+}
+
+window.reportStation = async (id, lat, lon, status) => {
+  await sendReport({ station_id: id, status, lat, lon, device_id: deviceId });
+};
+
+map.on("click", async (e) => {
+  if (mode === "бензовоз") {
+    await sendReport({
+      status: "бензовоз",
+      lat: e.latlng.lat, lon: e.latlng.lng,
+      comment: "Замечен бензовоз",
+      device_id: deviceId
+    });
+  }
+});
+
+async function sendReport(body) {
+  try {
+    const r = await fetch(`${API}/api/reports`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) {
+      const txt = await r.text();
+      showMsg("Ошибка: " + txt);
+      return;
+    }
+    showMsg("✅ Отметка сохранена");
+    map.closePopup();
+    await loadStations();
+    await loadTankers();
+  } catch (e) {
+    showMsg("Ошибка сети: " + e.message);
+  }
+}
+
+function timeAgo(date) {
+  const sec = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (sec < 60) return sec + " сек назад";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return min + " мин назад";
+  const h = Math.floor(min / 60);
+  if (h < 24) return h + " ч назад";
+  return Math.floor(h / 24) + " дн назад";
+}
+
+loadStations();
+loadTankers();
+setInterval(loadStations, 60000);
+setInterval(loadTankers, 60000);
+</script>
 </body>
 </html>
