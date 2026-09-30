@@ -206,3 +206,30 @@ def health():
 frontend_dir = Path(__file__).parent.parent / "frontend"
 if frontend_dir.exists():
     app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="static")
+
+
+@app.get("/api/admin/debug-geojson")
+def debug_geojson():
+    from pathlib import Path
+    data_file = Path(__file__).parent / "stations_raw.geojson"
+    result = {
+        "path": str(data_file),
+        "exists": data_file.exists(),
+    }
+    if data_file.exists():
+        result["size_bytes"] = data_file.stat().st_size
+        try:
+            with open(data_file, "r", encoding="utf-8") as f:
+                content = f.read()
+            result["first_200_chars"] = content[:200]
+            parsed = json.loads(content)
+            result["top_level_keys"] = list(parsed.keys()) if isinstance(parsed, dict) else f"not a dict: {type(parsed).__name__}"
+            if isinstance(parsed, dict):
+                result["has_features_key"] = "features" in parsed
+                result["features_count"] = len(parsed.get("features", []))
+                result["type"] = parsed.get("type")
+        except Exception as e:
+            result["parse_error"] = str(e)
+    backend_dir = Path(__file__).parent
+    result["files_in_backend"] = [f.name for f in backend_dir.iterdir()]
+    return result
