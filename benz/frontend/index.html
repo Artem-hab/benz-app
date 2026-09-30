@@ -6,80 +6,212 @@
 <title>BENZ — карта топлива</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
-  html, body, #map { height: 100%; margin: 0; font-family: system-ui, -apple-system, sans-serif; }
-  .panel {
-    position: absolute; top: 12px; left: 60px; z-index: 1000;
-    background: #fff; padding: 12px 14px; border-radius: 12px;
-    box-shadow: 0 4px 16px rgba(0,0,0,.18); max-width: 320px;
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, sans-serif; overflow: hidden; }
+  #app { display: flex; height: 100%; }
+  #map { flex: 1; height: 100%; }
+
+  #sidebar {
+    width: 380px;
+    background: #fff;
+    border-left: 1px solid #e2e8f0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: margin-right .25s;
   }
-  .panel h3 { margin: 0 0 8px; font-size: 15px; }
+  #sidebar.hidden { margin-right: -380px; }
+
+  .sidebar-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid #e2e8f0;
+    background: #f7fafc;
+  }
+  .sidebar-header h2 {
+    margin: 0 0 8px;
+    font-size: 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .refresh-info { font-size: 11px; color: #718096; font-weight: normal; }
+  .search-input {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid #cbd5e0;
+    border-radius: 6px;
+    font-size: 13px;
+  }
+
+  .filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 8px 16px;
+    border-bottom: 1px solid #e2e8f0;
+    background: #fff;
+  }
+  .filters button {
+    padding: 5px 10px;
+    font-size: 12px;
+    border: 1px solid #e2e8f0;
+    background: #fff;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .filters button.active { background: #2b6cb0; color: #fff; border-color: #2b6cb0; }
+
+  .station-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0;
+    margin: 0;
+    list-style: none;
+  }
+  .station-item {
+    padding: 12px 16px;
+    border-bottom: 1px solid #edf2f7;
+    cursor: pointer;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    transition: background .15s;
+  }
+  .station-item:hover { background: #f7fafc; }
+  .station-dot {
+    flex-shrink: 0;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    margin-top: 4px;
+    border: 2px solid #fff;
+    box-shadow: 0 0 0 1px #cbd5e0;
+  }
+  .station-info { flex: 1; min-width: 0; }
+  .station-name { font-weight: 600; font-size: 14px; }
+  .station-meta { font-size: 12px; color: #718096; margin-top: 3px; }
+  .station-distance { font-size: 11px; color: #a0aec0; }
+
+  #toggle-sidebar {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 1000;
+    background: #fff;
+    border: 0;
+    border-radius: 8px;
+    padding: 8px 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.2);
+    cursor: pointer;
+    font-size: 13px;
+  }
+
+  .panel {
+    position: absolute;
+    top: 12px;
+    left: 60px;
+    z-index: 1000;
+    background: #fff;
+    padding: 10px 12px;
+    border-radius: 12px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.18);
+    max-width: 300px;
+  }
   .panel .legend span {
     display: inline-block; padding: 3px 8px; border-radius: 6px;
-    margin: 2px; font-size: 12px; color: #fff;
+    margin: 2px; font-size: 11px; color: #fff;
   }
   .green { background: #2f855a; } .red { background: #c53030; }
   .yellow { background: #b7791f; } .blue { background: #2b6cb0; }
   .purple { background: #6b46c1; } .gray { background: #718096; }
   .panel button {
-    margin: 3px 3px 0 0; padding: 6px 10px; border: 0; border-radius: 6px;
-    cursor: pointer; background: #edf2f7; font-size: 13px;
+    margin: 3px 3px 0 0; padding: 5px 9px; border: 0; border-radius: 6px;
+    cursor: pointer; background: #edf2f7; font-size: 12px;
   }
   .panel button.active { background: #2b6cb0; color: #fff; }
-  .panel button:hover { background: #cbd5e0; }
-  .panel button.active:hover { background: #2b6cb0; }
-  .status-msg {
-    position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
-    background: #1a202c; color: #fff; padding: 10px 20px; border-radius: 8px;
-    z-index: 1001; display: none; font-size: 14px;
-  }
-  .status-msg.show { display: block; }
+
   .popup-btn {
-    display: block; margin: 4px 0; padding: 6px 10px; width: 100%;
+    display: block; margin: 3px 0; padding: 6px 10px; width: 100%;
     background: #4299e1; color: #fff; border: 0; border-radius: 6px;
-    cursor: pointer; font-size: 13px;
+    cursor: pointer; font-size: 12px;
   }
   .popup-btn:hover { background: #3182ce; }
-  .popup-row { margin: 4px 0; font-size: 13px; }
+  .popup-row { margin: 3px 0; font-size: 13px; }
+  .popup-stat {
+    background: #f7fafc; padding: 8px; border-radius: 6px;
+    margin-top: 6px; font-size: 12px;
+  }
+  .popup-stat b { color: #2d3748; }
+  .popup-events { margin-top: 6px; font-size: 12px; }
+  .popup-events div { padding: 3px 0; border-bottom: 1px solid #edf2f7; }
+  .popup-events .delivery { color: #2f855a; }
+  .popup-events .runout { color: #c53030; }
+
+  .toast {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: #1a202c; color: #fff; padding: 10px 20px; border-radius: 8px;
+    z-index: 2000; display: none; font-size: 14px;
+  }
+  .toast.show { display: block; }
+
+  @media (max-width: 768px) {
+    #sidebar { position: absolute; right: 0; height: 100%; z-index: 999; }
+    #sidebar.hidden { margin-right: 0; transform: translateX(100%); }
+    .panel { display: none; }
+  }
 </style>
 </head>
 <body>
-<div id="map"></div>
+<div id="app">
+  <div id="map"></div>
 
-<div class="panel">
-  <h3>⛽ BENZ — карта топлива</h3>
-  <div class="legend">
-    <span class="green">есть</span>
-    <span class="red">нет</span>
-    <span class="yellow">ограничение</span>
-    <span class="blue">очередь</span>
-    <span class="purple">бензовоз</span>
-    <span class="gray">нет данных</span>
+  <button id="toggle-sidebar">☰ Список АЗС</button>
+
+  <div class="panel">
+    <div class="legend">
+      <span class="green">есть</span>
+      <span class="red">нет</span>
+      <span class="yellow">огранич.</span>
+      <span class="blue">очередь</span>
+      <span class="purple">бензовоз</span>
+      <span class="gray">нет данных</span>
+    </div>
+    <div style="margin-top:6px"><b>Режим:</b> <span id="mode">просмотр</span></div>
+    <div>
+      <button data-mode="есть">✅ Есть</button>
+      <button data-mode="нет">❌ Нет</button>
+      <button data-mode="бензовоз">🚛 Бензовоз</button>
+      <button id="cancel">Отмена</button>
+    </div>
   </div>
-  <div style="margin-top:10px"><b>Режим:</b> <span id="mode">просмотр</span></div>
-  <div style="margin-top:6px">
-    <button data-mode="есть">✅ Есть</button>
-    <button data-mode="нет">❌ Нет</button>
-    <button data-mode="ограничение">⚠️ Огранич.</button>
-    <button data-mode="очередь">🚗 Очередь</button>
-    <button data-mode="бензовоз">🚛 Бензовоз</button>
-  </div>
-  <div style="margin-top:6px">
-    <button id="cancel">Отмена</button>
-    <button id="reload">🔄 Обновить</button>
-  </div>
+
+  <aside id="sidebar">
+    <div class="sidebar-header">
+      <h2>⛽ Заправки рядом <span class="refresh-info" id="refresh-info">—</span></h2>
+      <input id="search" class="search-input" placeholder="Поиск по названию или бренду..." />
+    </div>
+    <div class="filters" id="filters">
+      <button data-filter="all" class="active">Все</button>
+      <button data-filter="есть">Есть</button>
+      <button data-filter="нет">Нет</button>
+      <button data-filter="ограничение">Огранич.</button>
+      <button data-filter="очередь">Очередь</button>
+    </div>
+    <ul class="station-list" id="station-list"></ul>
+  </aside>
 </div>
 
-<div id="status-msg" class="status-msg"></div>
+<div id="toast" class="toast"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-const API = "";  // тот же домен, что и фронтенд
-const CENTER = [56.3269, 44.0059];  // Нижний Новгород
+const API = "";
+const CENTER = [56.3269, 44.0059];
+const REFRESH_SEC = 30;
 
 const deviceId = localStorage.getItem("deviceId") ||
   (() => { const id = crypto.randomUUID(); localStorage.setItem("deviceId", id); return id; })();
 
-const map = L.map("map").setView(CENTER, 12);
+const map = L.map("map").setView(CENTER, 13);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
   attribution: "© OpenStreetMap", maxZoom: 19
 }).addTo(map);
@@ -93,6 +225,10 @@ const stationsLayer = L.layerGroup().addTo(map);
 const tankersLayer = L.layerGroup().addTo(map);
 
 let mode = null;
+let allStations = [];
+let currentFilter = "all";
+let searchText = "";
+let lastUpdate = Date.now();
 
 document.querySelectorAll("[data-mode]").forEach(b => {
   b.onclick = () => {
@@ -100,7 +236,7 @@ document.querySelectorAll("[data-mode]").forEach(b => {
     document.querySelectorAll("[data-mode]").forEach(x => x.classList.remove("active"));
     b.classList.add("active");
     document.getElementById("mode").innerText = mode;
-    if (mode === "бензовоз") showMsg("Кликните по карте в месте, где видите бензовоз");
+    if (mode === "бензовоз") toast("Кликните по карте в месте, где видите бензовоз");
   };
 });
 
@@ -110,102 +246,35 @@ document.getElementById("cancel").onclick = () => {
   document.getElementById("mode").innerText = "просмотр";
 };
 
-document.getElementById("reload").onclick = () => { loadStations(); loadTankers(); };
+document.getElementById("toggle-sidebar").onclick = () => {
+  document.getElementById("sidebar").classList.toggle("hidden");
+};
 
-function showMsg(text, ms = 3000) {
-  const el = document.getElementById("status-msg");
+document.getElementById("search").oninput = (e) => {
+  searchText = e.target.value.toLowerCase();
+  renderList();
+};
+
+document.querySelectorAll("#filters button").forEach(b => {
+  b.onclick = () => {
+    currentFilter = b.dataset.filter;
+    document.querySelectorAll("#filters button").forEach(x => x.classList.remove("active"));
+    b.classList.add("active");
+    renderList();
+  };
+});
+
+function toast(text, ms = 3000) {
+  const el = document.getElementById("toast");
   el.innerText = text;
   el.classList.add("show");
   setTimeout(() => el.classList.remove("show"), ms);
 }
 
-async function loadStations() {
-  try {
-    const r = await fetch(`${API}/api/stations?lat=${CENTER[0]}&lon=${CENTER[1]}&radius_km=50&fresh_minutes=360`);
-    const list = await r.json();
-    stationsLayer.clearLayers();
-    list.forEach(s => {
-      const color = COLORS[s.last_status] || "#718096";
-      const marker = L.circleMarker([s.lat, s.lon], {
-        radius: 9, color: "#fff", weight: 2,
-        fillColor: color, fillOpacity: s.last_status ? 1 : 0.5
-      }).addTo(stationsLayer);
-
-      const age = s.last_report_at
-        ? timeAgo(new Date(s.last_report_at + "Z"))
-        : "нет данных";
-
-      marker.bindPopup(`
-        <div style="min-width:220px">
-          <b>${s.name || "АЗС"}</b>${s.brand ? " · " + s.brand : ""}<br>
-          <div class="popup-row">Статус: <b>${s.last_status || "неизвестно"}</b></div>
-          <div class="popup-row">Обновлено: ${age}</div>
-          <div class="popup-row">Отметок (за 6ч): ${s.reports_count || 0}</div>
-          <div style="margin-top:8px">
-            <button class="popup-btn" onclick="reportStation(${s.id}, ${s.lat}, ${s.lon}, 'есть')">✅ Есть топливо</button>
-            <button class="popup-btn" onclick="reportStation(${s.id}, ${s.lat}, ${s.lon}, 'нет')">❌ Нет топлива</button>
-            <button class="popup-btn" onclick="reportStation(${s.id}, ${s.lat}, ${s.lon}, 'ограничение')">⚠️ Ограничение</button>
-            <button class="popup-btn" onclick="reportStation(${s.id}, ${s.lat}, ${s.lon}, 'очередь')">🚗 Очередь</button>
-          </div>
-        </div>
-      `);
-    });
-  } catch (e) {
-    console.error("loadStations error:", e);
-    showMsg("Ошибка загрузки АЗС: " + e.message);
-  }
-}
-
-async function loadTankers() {
-  try {
-    const r = await fetch(`${API}/api/tankers?lat=${CENTER[0]}&lon=${CENTER[1]}&radius_km=50&minutes=120`);
-    const list = await r.json();
-    tankersLayer.clearLayers();
-    list.forEach(t => {
-      const icon = L.divIcon({ html: "🚛", className: "", iconSize: [26, 26] });
-      L.marker([t.lat, t.lon], { icon })
-        .bindPopup(`<b>Бензовоз</b><br>${new Date(t.created_at + "Z").toLocaleTimeString()}<br>${t.comment || ""}`)
-        .addTo(tankersLayer);
-    });
-  } catch (e) {
-    console.error("loadTankers error:", e);
-  }
-}
-
-window.reportStation = async (id, lat, lon, status) => {
-  await sendReport({ station_id: id, status, lat, lon, device_id: deviceId });
-};
-
-map.on("click", async (e) => {
-  if (mode === "бензовоз") {
-    await sendReport({
-      status: "бензовоз",
-      lat: e.latlng.lat, lon: e.latlng.lng,
-      comment: "Замечен бензовоз",
-      device_id: deviceId
-    });
-  }
-});
-
-async function sendReport(body) {
-  try {
-    const r = await fetch(`${API}/api/reports`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
-    });
-    if (!r.ok) {
-      const txt = await r.text();
-      showMsg("Ошибка: " + txt);
-      return;
-    }
-    showMsg("✅ Отметка сохранена");
-    map.closePopup();
-    await loadStations();
-    await loadTankers();
-  } catch (e) {
-    showMsg("Ошибка сети: " + e.message);
-  }
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371, dLat = (lat2-lat1)*Math.PI/180, dLon = (lon2-lon1)*Math.PI/180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(a));
 }
 
 function timeAgo(date) {
@@ -218,10 +287,242 @@ function timeAgo(date) {
   return Math.floor(h / 24) + " дн назад";
 }
 
+function getStatusColor(status) {
+  return COLORS[status] || "#718096";
+}
+
+async function loadStations() {
+  try {
+    const r = await fetch(`${API}/api/stations?lat=${CENTER[0]}&lon=${CENTER[1]}&radius_km=60&fresh_minutes=1440`);
+    allStations = await r.json();
+    // Добавляем расстояние от центра
+    allStations.forEach(s => {
+      s.distance_km = haversineKm(CENTER[0], CENTER[1], s.lat, s.lon);
+    });
+    allStations.sort((a, b) => a.distance_km - b.distance_km);
+
+    renderMarkers();
+    renderList();
+    lastUpdate = Date.now();
+    updateRefreshInfo();
+  } catch (e) {
+    console.error(e);
+    toast("Ошибка загрузки АЗС: " + e.message);
+  }
+}
+
+function renderMarkers() {
+  stationsLayer.clearLayers();
+  allStations.forEach(s => {
+    const color = getStatusColor(s.last_status);
+    const marker = L.circleMarker([s.lat, s.lon], {
+      radius: 8, color: "#fff", weight: 2,
+      fillColor: color, fillOpacity: s.last_status ? 1 : 0.5
+    }).addTo(stationsLayer);
+
+    marker.on("click", () => openStationPopup(s, marker));
+  });
+}
+
+function openStationPopup(s, marker) {
+  const age = s.last_report_at
+    ? timeAgo(new Date(s.last_report_at + "Z"))
+    : "нет данных";
+
+  // Формируем HTML попапа сразу с базовой инфой
+  const html = `
+    <div style="min-width:280px">
+      <b style="font-size:15px">${s.name || "АЗС"}</b>
+      ${s.brand && s.brand !== s.name ? `<div style="color:#718096;font-size:12px">${s.brand}</div>` : ""}
+      <div class="popup-row" style="margin-top:8px">Статус: <b style="color:${getStatusColor(s.last_status)}">${s.last_status || "неизвестно"}</b></div>
+      <div class="popup-row">Обновлено: ${age}</div>
+      <div class="popup-row">Отметок (за 24ч): ${s.reports_count || 0}</div>
+      <div style="margin-top:8px">
+        <button class="popup-btn" onclick="reportStation(${s.id}, ${s.lat}, ${s.lon}, 'есть')">✅ Есть топливо</button>
+        <button class="popup-btn" onclick="reportStation(${s.id}, ${s.lat}, ${s.lon}, 'нет')">❌ Нет топлива</button>
+        <button class="popup-btn" onclick="reportStation(${s.id}, ${s.lat}, ${s.lon}, 'ограничение')">⚠️ Ограничение</button>
+        <button class="popup-btn" onclick="reportStation(${s.id}, ${s.lat}, ${s.lon}, 'очередь')">🚗 Очередь</button>
+      </div>
+      <div id="stats-${s.id}" class="popup-stat">Загрузка статистики…</div>
+    </div>
+  `;
+
+  marker.bindPopup(html, { maxWidth: 320 }).openPopup();
+
+  // Асинхронно подгружаем статистику
+  loadStationStats(s.id);
+}
+
+async function loadStationStats(stationId) {
+  const container = document.getElementById(`stats-${stationId}`);
+  if (!container) return;
+
+  try {
+    const [eventsRes, predRes] = await Promise.all([
+      fetch(`${API}/api/stations/${stationId}/events?limit=5`),
+      fetch(`${API}/api/stations/${stationId}/prediction`)
+    ]);
+    const events = await eventsRes.json();
+    const pred = await predRes.json();
+
+    let html = "";
+
+    // Прогноз
+    if (pred.avg_interval_hours) {
+      const eta = pred.next_delivery_eta
+        ? new Date(pred.next_delivery_eta + "Z").toLocaleString("ru-RU")
+        : "—";
+      html += `<div><b>📊 Средний интервал привозов:</b> ${pred.avg_interval_hours.toFixed(1)} ч</div>`;
+      html += `<div><b>🔮 Следующий привоз:</b> ${eta}</div>`;
+      if (pred.confidence) {
+        html += `<div><b>Уверенность:</b> ${Math.round(pred.confidence*100)}%</div>`;
+      }
+    } else {
+      html += `<div style="color:#a0aec0">📊 Прогноз появится после 2+ привозов</div>`;
+    }
+
+    // История событий
+    if (events && events.length > 0) {
+      html += `<div class="popup-events"><b>📅 История:</b>`;
+      events.forEach(e => {
+        const date = new Date(e.created_at + "Z").toLocaleString("ru-RU");
+        const label = e.event_type === "delivery" ? "📥 Привоз" : "⚠️ Закончилось";
+        const cls = e.event_type === "delivery" ? "delivery" : "runout";
+        html += `<div class="${cls}">${label} — ${date}</div>`;
+      });
+      html += `</div>`;
+    } else {
+      html += `<div style="color:#a0aec0;font-size:11px;margin-top:6px">История пока пуста</div>`;
+    }
+
+    container.innerHTML = html;
+  } catch (e) {
+    container.innerHTML = `<span style="color:#c53030">Ошибка статистики</span>`;
+  }
+}
+
+function renderList() {
+  const listEl = document.getElementById("station-list");
+  let filtered = allStations;
+
+  if (currentFilter !== "all") {
+    filtered = filtered.filter(s => s.last_status === currentFilter);
+  }
+  if (searchText) {
+    filtered = filtered.filter(s => {
+      const name = (s.name || "").toLowerCase();
+      const brand = (s.brand || "").toLowerCase();
+      return name.includes(searchText) || brand.includes(searchText);
+    });
+  }
+
+  if (filtered.length === 0) {
+    listEl.innerHTML = `<li style="padding:20px;text-align:center;color:#a0aec0">Нет АЗС по фильтру</li>`;
+    return;
+  }
+
+  listEl.innerHTML = filtered.map(s => {
+    const color = getStatusColor(s.last_status);
+    const age = s.last_report_at
+      ? timeAgo(new Date(s.last_report_at + "Z"))
+      : "нет данных";
+    return `
+      <li class="station-item" onclick="focusStation(${s.id})">
+        <div class="station-dot" style="background:${color}"></div>
+        <div class="station-info">
+          <div class="station-name">${s.name || "АЗС"}</div>
+          <div class="station-meta">
+            ${s.last_status ? s.last_status : "нет данных"} · ${age}
+          </div>
+          <div class="station-distance">${s.distance_km.toFixed(1)} км от центра</div>
+        </div>
+      </li>
+    `;
+  }).join("");
+}
+
+window.focusStation = (id) => {
+  const s = allStations.find(x => x.id === id);
+  if (!s) return;
+  map.setView([s.lat, s.lon], 16);
+  // Открываем попап
+  stationsLayer.eachLayer(layer => {
+    if (layer.getLatLng().lat === s.lat && layer.getLatLng().lng === s.lon) {
+      layer.fire("click");
+    }
+  });
+};
+
+window.reportStation = async (id, lat, lon, status) => {
+  try {
+    const r = await fetch(`${API}/api/reports`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        station_id: id, status, lat, lon, device_id: deviceId
+      })
+    });
+    if (!r.ok) {
+      toast("Ошибка: " + (await r.text()));
+      return;
+    }
+    toast("✅ Отметка сохранена");
+    await loadStations();
+  } catch (e) {
+    toast("Ошибка сети: " + e.message);
+  }
+};
+
+map.on("click", async (e) => {
+  if (mode === "бензовоз") {
+    try {
+      const r = await fetch(`${API}/api/reports`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: "бензовоз",
+          lat: e.latlng.lat, lon: e.latlng.lng,
+          comment: "Замечен бензовоз",
+          device_id: deviceId
+        })
+      });
+      if (r.ok) toast("🚛 Бензовоз отмечен");
+    } catch (err) { toast("Ошибка: " + err.message); }
+  }
+});
+
+async function loadTankers() {
+  try {
+    const r = await fetch(`${API}/api/tankers?lat=${CENTER[0]}&lon=${CENTER[1]}&radius_km=50&minutes=120`);
+    const list = await r.json();
+    tankersLayer.clearLayers();
+    list.forEach(t => {
+      const icon = L.divIcon({ html: "🚛", className: "", iconSize: [26, 26] });
+      L.marker([t.lat, t.lon], { icon })
+        .bindPopup(`<b>Бензовоз</b><br>${new Date(t.created_at + "Z").toLocaleTimeString("ru-RU")}<br>${t.comment || ""}`)
+        .addTo(tankersLayer);
+    });
+  } catch (e) { console.error(e); }
+}
+
+function updateRefreshInfo() {
+  const sec = Math.floor((Date.now() - lastUpdate) / 1000);
+  document.getElementById("refresh-info").innerText = `обновлено ${sec} сек назад`;
+}
+
+// Автообновление списка
+setInterval(() => {
+  updateRefreshInfo();
+}, 1000);
+
+setInterval(async () => {
+  await loadStations();
+  await loadTankers();
+}, REFRESH_SEC * 1000);
+
+// Старт
 loadStations();
 loadTankers();
-setInterval(loadStations, 60000);
-setInterval(loadTankers, 60000);
 </script>
 </body>
 </html>
