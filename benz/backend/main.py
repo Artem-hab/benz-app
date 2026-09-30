@@ -25,37 +25,59 @@ async def import_stations(lat: float, lon: float, radius_km: float = 30, db: Ses
     from pathlib import Path
     from .predictor import haversine_km
 
-    data_file = Path(__file__).parent / "stations.json"
+    data_file = Path(__file__).parent / "stations_raw.geojson"
     if not data_file.exists():
-        raise HTTPException(500, "Файл stations.json не найден")
+        raise HTTPException(500, "Файл stations_raw.geojson не найден")
 
     with open(data_file, "r", encoding="utf-8") as f:
-        stations_data = json.load(f)
+        geojson = json.load(f)
 
+    features = geojson.get("features", [])
     added = 0
     skipped = 0
-    for s in stations_data:
-        d = haversine_km(lat, lon, s["lat"], s["lon"])
+
+    for feat in features:
+        props = feat.get("properties", {}) or {}
+        geom = feat.get("geometry", {}) or {}
+
+        # Пропускаем всё, что не АЗС
+        if props.get("amenity") != "fuel":
+            continue
+
+        # Координаты в GeoJSON — [lon, lat]!
+        coords = geom.get("coordinates")
+        if not coords or len(coords) < 2:
+            continue
+        s_lon, s_lat = coords[0], coords[1]
+
+        # Фильтр по радиусу
+        d = haversine_km(lat, lon, s_lat, s_lon)
         if d > radius_km:
             skipped += 1
             continue
 
-        osm_id = f"file_{s['lat']:.4f}_{s['lon']:.4f}"
+        # Стабильный ID
+        osm_id = feat.get("id") or props.get("@id") or f"feat_{s_lat:.4f}_{s_lon:.4f}"
+        osm_id = str(osm_id).replace("/", "_")
+
         if db.query(models.Station).filter_by(osm_id=osm_id).first():
             skipped += 1
             continue
 
+        name = props.get("name") or props.get("operator") or "АЗС"
+        brand = props.get("brand") or props.get("operator") or props.get("name")
+
         db.add(models.Station(
             osm_id=osm_id,
-            name=s["name"],
-            brand=s.get("brand"),
-            lat=s["lat"],
-            lon=s["lon"],
+            name=name,
+            brand=brand,
+            lat=s_lat,
+            lon=s_lon,
         ))
         added += 1
 
     db.commit()
-    return {"added": added, "skipped": skipped, "source": "stations.json"}
+    return {"added": added, "skipped": skipped, "total_features": len(features), "source": "stations_raw.geojson"}
 
 @app.get("/api/stations", response_model=list[schemas.StationOut])
 def get_stations(lat: float, lon: float, radius_km: float = 30, fresh_minutes: int = 180, db: Session = Depends(get_db)):
