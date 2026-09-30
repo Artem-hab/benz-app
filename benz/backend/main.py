@@ -197,17 +197,6 @@ def clear_stations(secret: str = "", db: Session = Depends(get_db)):
     db.commit()
     return {"deleted_stations": deleted, "message": "База очищена"}
 
-
-@app.get("/health")
-def health():
-    return {"ok": True}
-
-
-frontend_dir = Path(__file__).parent.parent / "frontend"
-if frontend_dir.exists():
-    app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="static")
-
-
 @app.get("/api/admin/debug-geojson")
 def debug_geojson():
     from pathlib import Path
@@ -233,3 +222,17 @@ def debug_geojson():
     backend_dir = Path(__file__).parent
     result["files_in_backend"] = [f.name for f in backend_dir.iterdir()]
     return result
+
+
+@app.get("/health")
+def health():
+    return {"ok": True}
+@app.get("/health")
+def health():
+    return {"ok": True}
+
+
+frontend_dir = Path(__file__).parent.parent / "frontend"
+if frontend_dir.exists():
+    app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="static")
+
