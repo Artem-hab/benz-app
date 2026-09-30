@@ -21,35 +21,41 @@ app.add_middleware(
 
 @app.post("/api/import-stations")
 async def import_stations(lat: float, lon: float, radius_km: float = 30, db: Session = Depends(get_db)):
-    r_m = int(radius_km * 1000)
-    q = f"""
-    [out:json][timeout:25];
-    (
-      node["amenity"="fuel"](around:{r_m},{lat},{lon});
-      way["amenity"="fuel"](around:{r_m},{lat},{lon});
-    );
-    out center tags;
-    """
-    async with httpx.AsyncClient(timeout=30) as c:
-        r = await c.post("https://overpass-api.de/api/interpreter", data={"data": q})
-        r.raise_for_status()
-        data = r.json()
+    import json
+    from pathlib import Path
+    from .predictor import haversine_km
+
+    data_file = Path(__file__).parent / "stations.json"
+    if not data_file.exists():
+        raise HTTPException(500, "Файл stations.json не найден")
+
+    with open(data_file, "r", encoding="utf-8") as f:
+        stations_data = json.load(f)
+
     added = 0
-    for el in data.get("elements", []):
-        osm_id = str(el["id"])
-        if db.query(models.Station).filter_by(osm_id=osm_id).first():
+    skipped = 0
+    for s in stations_data:
+        d = haversine_km(lat, lon, s["lat"], s["lon"])
+        if d > radius_km:
+            skipped += 1
             continue
-        tags = el.get("tags", {})
-        center = el.get("center") or el
+
+        osm_id = f"file_{s['lat']:.4f}_{s['lon']:.4f}"
+        if db.query(models.Station).filter_by(osm_id=osm_id).first():
+            skipped += 1
+            continue
+
         db.add(models.Station(
             osm_id=osm_id,
-            name=tags.get("name", "АЗС"),
-            brand=tags.get("brand"),
-            lat=center["lat"], lon=center["lon"],
+            name=s["name"],
+            brand=s.get("brand"),
+            lat=s["lat"],
+            lon=s["lon"],
         ))
         added += 1
+
     db.commit()
-    return {"added": added}
+    return {"added": added, "skipped": skipped, "source": "stations.json"}
 
 @app.get("/api/stations", response_model=list[schemas.StationOut])
 def get_stations(lat: float, lon: float, radius_km: float = 30, fresh_minutes: int = 180, db: Session = Depends(get_db)):
